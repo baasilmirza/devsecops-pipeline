@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+
+# Never commit plaintext secrets or keys
+secrets/*.plain.yaml
+secrets/*.plain.env
+secrets/app-secret.yaml
+age.key
+*.agekey
+*.key
+
+# Generated at deploy time (encrypted, but cluster-specific)
+secrets/sealed-secret.yaml
+
+# Tooling caches
+.trivy/
+.checkov/
+sbom/
+
+# Personal / not published
+SPEC.md
+INSTRUCTIONS.md
