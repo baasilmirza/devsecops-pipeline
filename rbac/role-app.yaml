@@ -1,0 +1,11 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: portfolio-app
+  namespace: portfolio
+rules:
+  # Read-only, namespace-scoped, and only the one resource the app could ever
+  # need. No secrets, no writes, no cluster scope.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
