@@ -1,0 +1,30 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-labels
+  annotations:
+    policies.kyverno.io/title: Require ownership labels
+    policies.kyverno.io/severity: low
+    policies.kyverno.io/category: Governance
+    policies.kyverno.io/description: >-
+      Every workload must declare a team owner and an application name so that
+      incidents can be routed and cost can be attributed.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: require-team-and-app-labels
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - portfolio
+      validate:
+        message: "Pods in the 'portfolio' namespace must have 'team' and 'app.kubernetes.io/name' labels."
+        pattern:
+          metadata:
+            labels:
+              team: "?*"
+              app.kubernetes.io/name: "?*"

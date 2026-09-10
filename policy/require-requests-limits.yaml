@@ -1,0 +1,35 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-requests-limits
+  annotations:
+    policies.kyverno.io/title: Require CPU and memory requests and limits
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/category: Resource Management
+    policies.kyverno.io/description: >-
+      Containers without resource requests and limits can starve neighbours or
+      consume a whole node. Pods in the 'portfolio' namespace must set both.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: require-resource-requests-and-limits
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - portfolio
+      validate:
+        message: "Pods in the 'portfolio' namespace must set CPU and memory requests and limits."
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    memory: "?*"
+                    cpu: "?*"
+                  limits:
+                    memory: "?*"
+                    cpu: "?*"

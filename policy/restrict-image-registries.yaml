@@ -1,0 +1,29 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-image-registries
+  annotations:
+    policies.kyverno.io/title: Restrict image registries
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/category: Supply Chain
+    policies.kyverno.io/description: >-
+      Only images from approved registries may run. This blocks pulling an
+      arbitrary image from a public registry that bypasses our scanning.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: validate-registries
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - portfolio
+      validate:
+        message: "Images must come from an approved registry (docker.io or ghcr.io)."
+        pattern:
+          spec:
+            containers:
+              - image: "docker.io/* | ghcr.io/*"
