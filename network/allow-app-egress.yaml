@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-egress
+  namespace: portfolio
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    # Intra-namespace traffic to the app only. No egress to the internet, to
+    # other namespaces, or to the metadata service.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: portfolio-app
+      ports:
+        - protocol: TCP
+          port: 8000

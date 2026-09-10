@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-app-ingress
+  namespace: portfolio
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: portfolio-app
+  policyTypes:
+    - Ingress
+  ingress:
+    # Only pods inside the namespace may reach the app, and only on its port.
+    # A pod in another namespace (e.g. default) is still denied.
+    - from:
+        - podSelector: {}
+      ports:
+        - protocol: TCP
+          port: 8000
