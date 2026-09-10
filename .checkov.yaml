@@ -1,0 +1,18 @@
+# Checkov configuration for the Kubernetes framework.
+# Consumed by .github/workflows/security.yml (bridgecrewio/checkov-action).
+framework:
+  - kubernetes
+soft-fail: false
+skip-path:
+  - .venv
+  - docs
+  - tests
+  - app
+  - sbom
+skip-check:
+  # The app image is built locally and loaded into kind; it has no registry
+  # digest. It is pinned by an immutable tag instead.
+  - CKV_K8S_43
+  # imagePullPolicy must be IfNotPresent so the kind-loaded image is used;
+  # Always would force a pull from docker.io and fail.
+  - CKV_K8S_15

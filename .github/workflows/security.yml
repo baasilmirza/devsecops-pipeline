@@ -1,0 +1,175 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+jobs:
+  # 1. Secret scanning — fail the build if a credential ever lands in git.
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 2. IaC / manifest scanning — Kubernetes YAML is infrastructure too.
+  iac-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkov (Kubernetes manifests)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: kubernetes
+          output_format: cli
+          soft_fail: false
+          skip_path: docs,tests,app
+
+  # 3. Lint + unit tests — cheap gates first.
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest
+
+  # 4. Admission policy regression — the compliant manifest must pass Kyverno.
+  policy-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Kyverno CLI
+        uses: kyverno/action-install-cli@v0.2.0
+      - name: Write compliant and non-compliant pods
+        run: |
+          cat > /tmp/good.yaml <<'EOF'
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: good-pod
+            namespace: portfolio
+            labels:
+              team: platform
+              app.kubernetes.io/name: good
+          spec:
+            securityContext:
+              runAsNonRoot: true
+            containers:
+              - name: good
+                image: docker.io/library/portfolio-api:0.1.0
+                resources:
+                  requests:
+                    cpu: 50m
+                    memory: 64Mi
+                  limits:
+                    cpu: 200m
+                    memory: 128Mi
+          EOF
+          cat > /tmp/bad.yaml <<'EOF'
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: bad-pod
+            namespace: portfolio
+            labels:
+              team: platform
+              app.kubernetes.io/name: bad
+          spec:
+            containers:
+              - name: bad
+                image: nginx:latest
+          EOF
+      - name: Compliant pod must pass all policies
+        run: kyverno apply policy/ --resource /tmp/good.yaml
+      - name: Non-compliant pod (no limits, latest tag) must be denied
+        run: |
+          if kyverno apply policy/ --resource /tmp/bad.yaml; then
+            echo "::error::Kyverno should have denied the non-compliant pod"
+            exit 1
+          else
+            echo "Kyverno correctly denied the non-compliant pod"
+          fi
+
+  # 5. Build the image, scan it, and emit an SBOM for the supply chain.
+  build-scan-sbom:
+    needs: [secret-scan, iac-scan, lint-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci
+      - name: Trivy image scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 1
+      - name: Trivy SARIF (upload to code scanning)
+        if: always()
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: 0
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+      - name: Generate SBOM (syft)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+          artifact-name: sbom-${{ github.sha }}
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json
+      - name: Push semver tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION=${TAG#v}
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:ci ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${VERSION}
