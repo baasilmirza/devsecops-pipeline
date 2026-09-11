@@ -26,3 +26,4 @@ sbom/
 # Personal / not published
 SPEC.md
 INSTRUCTIONS.md
+docs/*blog*.md
